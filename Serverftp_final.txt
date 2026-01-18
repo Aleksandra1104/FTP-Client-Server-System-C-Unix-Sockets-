@@ -1,0 +1,933 @@
+/* 
+ * Server FTP program
+ *
+ * Listens for a control connection, receives one-line FTP-like commands,
+ * executes them on the server filesystem, and sends one
+ * reply line back to the client per command.
+ *
+ * Control: client -> server (SERVER_FTP_PORT)
+ * Data:    server -> client (connects to client's DATA_FTP_PORT)
+ *
+ * Implemented commands:
+ *   user <username>      (login not required)
+ *   pass <password>      (after user)
+ *   quit
+ *   mkdir|mkd <dir>      (login required) 
+ *   rmdir|rmd <dir>      (login required)  
+ *   cd|cwd <dir>         (login required)  
+ *   dele <file>          (login required)  
+ *   pwd                  (login required)  
+ *   ls                   (login required)  
+ *   stat|status          (login not required)    
+ *   help                 (login not required)
+ *   put <filename> (upload client => server) (login required)
+ *   get <filename> (download server => client) (login required)
+ *   utility functions and structures are: Session, session_init, str_tolower, split_cmd, send_reply, require_login, do_put, do_get
+ *
+ * 
+ */
+
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <errno.h>
+#include <arpa/inet.h>
+
+#define SERVER_FTP_PORT 9119
+#define DATA_FTP_PORT   9120
+
+/* Error and OK codes */
+#define OK 0
+#define ER_INVALID_HOST_NAME -1
+#define ER_CREATE_SOCKET_FAILED -2
+#define ER_BIND_FAILED -3
+#define ER_CONNECT_FAILED -4
+#define ER_SEND_FAILED -5
+#define ER_RECEIVE_FAILED -6
+#define ER_ACCEPT_FAILED -7
+
+/* Function prototypes */
+int svcInitServer(int *s);
+int sendMessage (int s, char *msg, int  msgSize);
+int receiveMessage(int s, char *buffer, int  bufferSize, int *msgSize);
+
+/* Globals from HW#1 */
+char userCmd[1024];
+char cmd[1024];
+char argument[1024];
+char replyMsg[2048];
+
+/*  Session/login state  */
+static const char *USERS[] = {"lindsey", "sasha", "percy", NULL};
+static const char *PASSW[] = {"4928",   "p421", "april1", NULL};
+
+/** 
+ * struct Session
+ * 
+ * Holds per-connection login state and a cached current working directory.
+ *
+ * Fields:
+ *  - authed     : 1 if the client is authenticated; 0 otherwise
+ *  - user_index : index into USERS/PASSW when a valid USER has been given, -1 if none
+ *  - cwd        : last known working directory for status/pwd replies
+ */
+typedef struct {
+    int  authed;
+    int  user_index;
+    char cwd[PATH_MAX];
+} Session;
+
+/**
+ * session_init
+ * 
+ * Initialize a Session to a logged-out state and cache the current working directory.
+ *
+ * Params:
+ *  - S : (out) pointer to Session to initialize
+ *
+ * Returns:
+ *  - void
+ */
+static void session_init(Session *S) {
+    S->authed = 0;
+    S->user_index = -1;
+    if (getcwd(S->cwd, sizeof(S->cwd)) == NULL) strcpy(S->cwd, "/");
+}
+
+/*  Utility: lowercase in-place  */
+/**
+ * str_tolower
+ * 
+ * Converts a C-string to lowercase in place.
+ *
+ * Params:
+ *  - s : pointer to NUL-terminated string; if NULL, does nothing
+ *
+ * Returns:
+ *  - void
+ */
+static void str_tolower(char *s) { if (!s) return; for (; *s; ++s) *s = (char)tolower((unsigned char)*s); }
+
+
+/**
+ * split_cmd
+ * 
+ * Splits a line like "cmd arg with spaces" into:
+ *   - out_cmd: first token (command)
+ *   - out_arg: the rest of the line (trimmed of trailing whitespace/CR/LF)
+ * Leading spaces/tabs are skipped.
+ *
+ * Params:
+ *  - line     : (in)  input line (may contain trailing \n/\r); may be NULL
+ *  - out_cmd  : (out) buffer to receive command token
+ *  - csz      : (in)  size of out_cmd
+ *  - out_arg  : (out) buffer to receive the remaining argument text
+ *  - asz      : (in)  size of out_arg
+ *
+ * Returns:
+ *  - 0 : no input
+ *  - 1 : only a command was found (no argument)
+ *  - 2 : command and argument present
+ */
+static int split_cmd(const char *line, char *out_cmd, size_t csz, char *out_arg, size_t asz) {
+    out_cmd[0] = out_arg[0] = '\0';  	/* initialize outputs to empty strings */
+    if (!line) return 0;		/* returns 0 if NULL input */
+    while (*line==' ' || *line=='\t') line++;	/* skip leading spaces/tabs */
+    if (!*line) return 0;		/* string was all whitespace */
+    size_t i=0;				/* index for scanning the command token */
+
+    /* copy first token (non-space sequence) into out_cmd, leaving room for '\0' */
+    while (line[i] && !isspace((unsigned char)line[i]) && i+1<csz) { out_cmd[i]=line[i]; i++; }
+    out_cmd[i]='\0';			/* NUL-terminate command */
+    while (line[i] && isspace((unsigned char)line[i])) i++;	/* skip spaces between command and argument */
+    size_t j=0;				/* index for scanning the argument */
+	
+    /* copy the rest of the line as the argument, leaving room for '\0' */
+    while (line[i] && j+1<asz) { out_arg[j++]=line[i++]; }
+
+    /* trim trailing newline, carriage return, spaces, and tabs from argument */
+    while (j>0 && (out_arg[j-1]=='\n' || out_arg[j-1]=='\r' || out_arg[j-1]==' ' || out_arg[j-1]=='\t')) j--;
+    out_arg[j]='\0';			/* NUL-terminate argument */
+    return out_arg[0]?2:1;		/* return 2 if arg non-empty, else 1 */
+}
+
+
+/**
+ * send_reply
+ * 
+ * Formats and sends a single FTP-style reply line: "ddd message\n",
+ * including the terminating NUL, via sendMessage().
+ *
+ * Params:
+ *  - csock : (in)  connected control socket
+ *  - code  : (in)  3-digit reply code (e.g., 220, 331, 230, 550)
+ *  - fmt   : (in)  printf-style format string for the reply text
+ *  - ...   : (in)  format arguments
+ *
+ * Returns:
+ *  - OK on success
+ *  - ER_SEND_FAILED if send fails
+ */
+static int send_reply(int csock, int code, const char *fmt, ...) {
+    char msg[1024];		/* Buffer for formatted message text (without code) */
+    va_list ap;			/* Declare a va_list iterator for the unnamed ... arguments */
+    va_start(ap, fmt);		/* Initialize that iterator. The second parameter must be the last named parameter in the function */
+                                      
+    vsnprintf(msg, sizeof(msg), fmt, ap);	/* Write formatted message into msg (NUL-terminated) */
+    va_end(ap);					/* Tell the runtime you are done with 'ap' */
+
+    
+    char line[1200];		/* buffer for full reply line: "code" + space + msg + newline */
+    snprintf(line, sizeof(line), "%d %s\n", code, msg);		/* compose final line with status code and message */
+    return sendMessage(csock, line, (int)strlen(line)+1);	/* send the line; +1 includes the NUL terminator */
+}
+
+/*  Guard for commands requiring login  */
+
+static inline int require_login(Session *sess, int sock) {
+    if ((sess)->authed == 0) {
+        send_reply(sock, 530, "Please login first.");
+        return 0;  /* not logged in */
+    }
+    return 1;      /* ok */
+}
+
+/* DATA CONNECTION HELPER */
+/**
+ * open_data_conn_to_client
+ * 
+ * Establishes the active-mode data connection from the server to the client.
+ * It derives the client's IPv4 address from the already-established control socket
+ * ('csock') using getpeername(), then opens a new TCP socket and connects to the
+ * client's data port (DATA_FTP_PORT, 9120).
+ *
+ * "Reverse of control connection":
+ *   - Control: client  -> server (server accepted it on SERVER_FTP_PORT)
+ *   - Data:    server  -> client (server connects back to DATA_FTP_PORT)
+ *
+ * Params:
+ *  - csock : (in) connected control socket to the client; used to obtain the
+ *            client's IP address via getpeername().
+ *
+ * Returns:
+ *  - >= 0 : data socket file descriptor on success (connected to client:DATA_FTP_PORT)
+ *  - -1   : on failure (errno set where applicable).
+ */
+ static int open_data_conn_to_client(int csock) {
+    /* Will hold the client's address (IP + port) */
+    struct sockaddr_in peer;
+    /* Size of the peer structure */
+    socklen_t plen = sizeof(peer);
+    /* Get the address of the peer (client) connected to the control socket csock */
+    if (getpeername(csock, (struct sockaddr *)&peer, &plen) < 0) {
+        /* Print error if we cannot retrieve peer info */
+        perror("getpeername");
+        return -1;
+    }
+    /* Create a new TCP socket for the data connection */
+    int dsock = socket(AF_INET, SOCK_STREAM, 0);
+    /* Print error if socket creation fails */
+    if (dsock < 0) { perror("socket(data)"); return -1; }
+
+
+    /* Convert port to network byte order */
+    peer.sin_port = htons(DATA_FTP_PORT);
+    /* Connect the data socket to the client at (peer IP, DATA_FTP_PORT) */
+    if (connect(dsock, (struct sockaddr *)&peer, sizeof(peer)) < 0) {
+        perror("connect(data)");
+        /* Clean up the socket if data connection failed */
+        close(dsock);
+        return -1;
+    }
+
+    /* On success, return the data socket file descriptor */ 
+    return dsock;
+}
+
+
+/*  Command handlers  */
+/**
+ * do_user
+ * 
+ * Sets pending username (not yet authenticated).
+ *
+ * Params:
+ *  - S     : (in/out) session state (user_index/authed may change)
+ *  - csock : (in)     control socket to send reply on
+ *  - arg   : (in)     username string
+ *
+ * Replies:
+ *  - 331 if username is recognized (password required next)
+ *  - 501 if missing username
+ *  - 530 if username is invalid
+ *
+ * Returns:
+ *  - void (sends exactly one reply)
+ */
+static void do_user(Session *S, int csock, const char *arg) {
+    /* If no argument or empty string, complain and return (501 = syntax error in params) */
+    if (!arg || !*arg) { send_reply(csock, 501, "Need username."); return; }
+    /* Scan USERS list */
+    for (int i=0; USERS[i]; ++i) {
+	/* Compare provided username to USERS[i]; strcmp == 0 means a match */
+        if (strcmp(arg, USERS[i]) == 0) {
+	    /* Record which user matched (index) and mark as not yet authenticated (awaiting password). */
+            S->user_index = i; S->authed = 0;
+            send_reply(csock, 331, "User name okay, need password.");
+            return;
+        }
+    }
+    
+    /* No match found: clear user index and mark unauthenticated. */
+    S->user_index = -1; S->authed = 0;
+    send_reply(csock, 530, "Invalid user.");
+}
+
+/**
+ * do_pass
+ * 
+ * Verifies password for prior USER and sets authed.
+ *
+ * Params:
+ *  - S     : (in/out) session (authed may change)
+ *  - csock : (in)     control socket
+ *  - arg   : (in)     password string
+ *
+ * Replies:
+ *  - 230 on success
+ *  - 503 if username was not sent first
+ *  - 501 if missing password
+ *  - 530 if login incorrect
+ *
+ * Returns:
+ *  - void
+ */
+static void do_pass(Session *S, int csock, const char *arg) {
+    /* Must have username provided first (user_index set) */
+    if (S->user_index < 0) { send_reply(csock, 503, "Login with USER first."); return; }
+
+    /* Password argument must be present and non-empty */
+    if (!arg || !*arg)     { send_reply(csock, 501, "Need password."); return; }
+
+    /* Compare provided password with stored password for this user (PASSW is parallel to USERS) */
+    if (strcmp(arg, PASSW[S->user_index]) == 0) {
+        S->authed = 1;		/* mark session as authenticated */
+	/* Initialize current working directory in the session:
+           getcwd fills S->cwd; if it fails, fall back to root "/" */
+        if (getcwd(S->cwd, sizeof(S->cwd)) == NULL) strcpy(S->cwd, "/");
+        send_reply(csock, 230, "User logged in, proceed.");
+    } else {
+        S->authed = 0;		/* ensure not authenticated on failure */
+        send_reply(csock, 530, "Login incorrect.");
+    }
+}
+
+/**
+ * do_quit
+ * 
+ * Sends goodbye; main loop will exit after dispatch.
+ *
+ * Params:
+ *  - S     : (in/out) session 
+ *  - csock : (in)     control socket
+ *
+ * Replies:
+ *  - 221 always
+ *
+ * Returns:
+ *  - void
+ */
+static void do_quit(Session *S, int csock) {
+    (void)S;
+    send_reply(csock, 221, "Goodbye.");
+    /* main loop will break after seeing cmd == quit */
+}
+
+/**
+ * do_pwd
+ * 
+ * Replies with current working directory (server side).
+ * Requires authentication.
+ *
+ * Params:
+ *  - S     : (in/out) session; updates S->cwd on success
+ *  - csock : (in)     control socket
+ *
+ * Replies:
+ *  - 257 "<cwd>" on success
+ *  - 550 on failure
+ *
+ * Returns:
+ *  - void
+ */
+static void do_pwd(Session *S, int csock) {
+    if (!require_login(S, csock)) return;	 /* ensure user is authenticated; returns if not */
+    char buf[PATH_MAX];				/* buffer to hold absolute path */
+    if (getcwd(buf, sizeof(buf)) == NULL) {	/* query OS for current working directory */
+        send_reply(csock, 550, "pwd command failed.");
+    } else {
+        strncpy(S->cwd, buf, sizeof(S->cwd));	/* cache CWD into the session struct */
+        S->cwd[sizeof(S->cwd)-1] = '\0';	/* force NUL-termination in case of truncation */
+        send_reply(csock, 257, "\"%s\"", buf);	/* 257 = 'PATHNAME created' */
+    }
+}
+
+/**
+ * do_cd
+ * 
+ * Changes server's working directory.
+ * Requires authentication.
+ *
+ * Params:
+ *  - S     : (in/out) session; updates S->cwd on success
+ *  - csock : (in)     control socket
+ *  - arg   : (in)     target directory path
+ *
+ * Replies:
+ *  - 250 on success (reports new directory)
+ *  - 501 if missing argument
+ *  - 550 if chdir fails
+ *
+ * Returns:
+ *  - void
+ */
+static void do_cd(Session *S, int csock, const char *arg) {
+    if (!require_login(S, csock)) return;		/* ensure client is authenticated */
+    if (!arg || !*arg) {                                       /* missing or empty directory argument */
+        send_reply(csock, 501, "Need directory.");            /* 501 = syntax error in parameters */
+        return;
+    }	
+    if (chdir(arg) == 0) {
+        if (getcwd(S->cwd, sizeof(S->cwd)) == NULL) strcpy(S->cwd, "/");	/* update cached cwd in the session; fallback to "/" if getcwd fails */
+        send_reply(csock, 250, "Directory changed to %s.", S->cwd);
+    } else {
+        send_reply(csock, 550, "Failed to change directory.");
+    }
+}
+
+/**
+ * do_mkdir
+ * 
+ * Creates a directory (using system()).
+ * Requires authentication.
+ *
+ * Params:
+ *  - S     : (in)  session
+ *  - csock : (in)  control socket
+ *  - arg   : (in)  directory name/path
+ *
+ * Replies:
+ *  - 257 "<dir> created." on success
+ *  - 501 if missing argument
+ *  - 550 if mkdir fails
+ *
+ * Returns:
+ *  - void
+ */
+static void do_mkdir(Session *S, int csock, const char *arg) {
+    if (!require_login(S, csock)) return;		/* ensure client is authenticated */
+    if (!arg || !*arg) { send_reply(csock, 501, "Need directory name."); return; }	/* require a non-empty directory name */
+    char syscmd[512];			/* buffer to build the shell command */
+    snprintf(syscmd, sizeof(syscmd), "mkdir -p -- %s", arg);		/* Build mkdir command. -p = create parent directories as needed. */
+    int rc = system(syscmd);						/* execute via the shell; returns exit status */
+    if (rc == 0) send_reply(csock, 257, "\"%s\" successfully created.", arg);	/* exit status 0 means success */
+    else         send_reply(csock, 550, "mkdir command failed.");
+}
+
+/**
+ * do_rmdir
+ * 
+ * Removes a directory (must be empty).
+ * Requires authentication.
+ *
+ * Params:
+ *  - S     : (in)  session
+ *  - csock : (in)  control socket
+ *  - arg   : (in)  directory path
+ *
+ * Replies:
+ *  - 250 on success
+ *  - 501 if missing argument
+ *  - 550 if rmdir fails
+ *
+ * Returns:
+ *  - void
+ */
+static void do_rmdir(Session *S, int csock, const char *arg) {
+    if (!require_login(S, csock)) return;		/* ensure client is authenticated */
+    if (!arg || !*arg) { send_reply(csock, 501, "Need directory name."); return; }	/* require a non-empty directory name */
+    char syscmd[512];					/* buffer to build the shell command */
+    snprintf(syscmd, sizeof(syscmd), "rmdir -- %s", arg);	/* Build rmdir command */
+    int rc = system(syscmd);					/* execute via the shell; returns exit status */
+    if (rc == 0) send_reply(csock, 250, "Directory removed.");	/* exit status 0 means success */
+    else         send_reply(csock, 550, "rmdir failed.");
+}
+
+/**
+ * do_dele
+ * 
+ * Deletes a file via system("rm -f -- <file>").
+ * Requires authentication.
+ *
+ * Params:
+ *  - S     : (in)  session
+ *  - csock : (in)  control socket
+ *  - arg   : (in)  filename/path
+ *
+ * Replies:
+ *  - 250 on success
+ *  - 501 if missing argument
+ *  - 550 if deletion fails
+ *
+ * Returns:
+ *  - void
+ */
+static void do_dele(Session *S, int csock, const char *arg) {
+    if (!require_login(S, csock)) return;		/* ensure client is authenticated */
+    if (!arg || !*arg) { send_reply(csock, 501, "Need filename."); return; }	/* require a non-empty file name */
+    char syscmd[512];					/* buffer to build the shell command */
+    snprintf(syscmd, sizeof(syscmd), "rm -f -- %s", arg);	/* Build rm command; -f = dont ask, dont complain if the file is missing */
+    int rc = system(syscmd);					/* execute via the shell; returns exit status */
+    if (rc == 0) send_reply(csock, 250, "File deleted.");
+    else         send_reply(csock, 550, "delete failed.");
+}
+
+/**
+ * do_ls
+ * 
+ * Runs "ls -l" on the server console,
+ * and sends a summary reply to the client.
+ * Requires authentication.
+ *
+ * Params:
+ *  - S     : (in) session
+ *  - csock : (in) control socket
+ *
+ * Replies:
+ *  - 212 "ls done." on success
+ *  - 550 on failure
+ *
+ * Returns:
+ *  - void
+ */
+static void do_ls(Session *S, int csock) {
+    if (!require_login(S, csock)) return;		/* ensure client is authenticated */
+    /* Show listing on server console; client gets a summary reply. */
+    int rc = system("ls -l");
+    if (rc == 0) send_reply(csock, 212, "ls done.");
+    else         send_reply(csock, 550, "ls failed.");
+}
+
+/**
+ * do_stat
+ *
+ * Reports transfer mode (ASCII), login state, user, and cwd.
+ * Pre-login allowed.
+ *
+ * Params:
+ *  - S     : (in) session
+ *  - csock : (in) control socket
+ *
+ * Replies:
+ *  - 211 with a formatted status line
+ *
+ * Returns:
+ *  - void
+ */
+static void do_stat(Session *S, int csock) {
+    const char *who = "ninja";									/* default username if not logged in */
+    if (S->authed && S->user_index >= 0 && USERS[S->user_index]) who = USERS[S->user_index];	/* if authenticated and user index valid, use username from USERS */
+    const char *cwd = (S->cwd[0]? S->cwd : "/");						/* use cached CWD if set; else fall back to "/" */
+    send_reply(csock, 211, "mode=ASCII, logged_in=%d, user=%s, cwd=%s", S->authed, who, cwd);
+}
+
+/**
+ * do_help
+ * 
+ * Returns a list of supported commands.
+ *
+ * Params:
+ *  - csock : (in) control socket
+ *
+ * Replies:
+ *  - 214 with a one-line summary of commands
+ *
+ * Returns:
+ *  - void
+ */
+static void do_help(int csock) {
+    send_reply(csock, 214,
+        "Commands: user <u>, pass <p>, quit, mkdir/mkd <dir>, rmdir/rmd <dir>, cd/cwd <dir>, "
+        "dele <file>, pwd, ls, stat/status, help, get <file>, put <file>");
+}
+
+
+/**
+ * do_put
+ * Handles an upload from client -> server using the active-mode data connection.
+ * Sequence:
+ *   1) Requires authentication and a non-empty filename.
+ *   2) Opens/creates the destination file on the server (binary write).
+ *   3) Sends 150 reply on the control socket.
+ *   4) Opens the reverse data connection to the client (DATA_FTP_PORT) and
+ *      receives file bytes until the client closes (EOF).
+ *   5) Closes data socket and file; replies 226 on success.
+ *
+ * Params:
+ *  - S     : (in/out) session state (must be logged in)
+ *  - csock : (in)     control connection socket
+ *  - arg   : (in)     server-side filename to create/write
+ *
+ * Replies:
+ *  - 501 if filename is missing
+ *  - 550 if file cannot be created
+ *  - 150 before starting transfer
+ *  - 425 if data connection cannot be opened
+ *  - 226 after successful transfer (or after best-effort close)
+ *
+ * Notes:
+ *  - Uses blocking recv() loop on the data socket and fwrite() to store bytes.
+ *  - Any I/O error during recv()/fwrite() aborts the loop; file/socket are closed.
+ */
+static void do_put(Session *S, int csock, const char *arg) {
+    if (!require_login(S, csock)) return;
+    if (!arg || !*arg) { send_reply(csock, 501, "Need filename."); return; }
+
+    send_reply(csock, 150, "Opening data connection for put.");
+    int dsock = open_data_conn_to_client(csock);
+    if (dsock < 0) {
+        send_reply(csock, 425, "Can't open data connection.");
+        return;
+    }
+
+    char buf[4096];
+    ssize_t r;
+
+    /* First read and decide whether to create the file */
+    r = recv(dsock, buf, sizeof(buf), 0);
+    if (r < 0) {
+        perror("recv (put, first)");
+        shutdown(dsock, SHUT_RD);
+        close(dsock);
+        send_reply(csock, 426, "Connection closed; transfer aborted.");
+        return;
+    }
+    if (r == 0) {
+        /* No data at all; treat as client-side file not found; do NOT create file */
+        shutdown(dsock, SHUT_RD);
+        close(dsock);
+        send_reply(csock, 550, "No data received.");
+        return;
+    }
+
+    /* Have at least one byte, now create the destination file */
+    FILE *f = fopen(arg, "wb");
+    if (!f) {
+        /* Can't create local file; drain remaining data so server side doesn't RST mid-transfer */
+        perror("fopen (put)");
+        while ((r = recv(dsock, buf, sizeof(buf), 0)) > 0) { /* discard */ }
+        shutdown(dsock, SHUT_RD);
+        close(dsock);
+        send_reply(csock, 550, "Cannot create file.");
+        return;
+    }
+
+    /* Write the first chunk we already received */
+    if (fwrite(buf, 1, (size_t)r, f) < (size_t)r) {
+        perror("fwrite (put, first)");
+        fclose(f);
+        while ((r = recv(dsock, buf, sizeof(buf), 0)) > 0) { /* discard */ }
+        shutdown(dsock, SHUT_RD);
+        close(dsock);
+        send_reply(csock, 451, "Local error in processing.");
+        return;
+    }
+
+    /* Continue receiving the rest */
+    while ((r = recv(dsock, buf, sizeof(buf), 0)) > 0) {
+        if (fwrite(buf, 1, (size_t)r, f) < (size_t)r) {
+            perror("fwrite (put)");
+            fclose(f);
+            while ((r = recv(dsock, buf, sizeof(buf), 0)) > 0) { /* discard */ }
+            shutdown(dsock, SHUT_RD);
+            close(dsock);
+            send_reply(csock, 451, "Local error in processing.");
+            return;
+        }
+    }
+
+    fclose(f);
+    shutdown(dsock, SHUT_RD);
+    close(dsock);
+
+    if (r < 0) {
+        perror("recv (put)");
+        send_reply(csock, 426, "Connection closed; transfer aborted.");
+        return;
+    }
+
+    send_reply(csock, 226, "Transfer complete.");
+}
+
+/**
+ * do_get
+ * Handles a download from server -> client using the active-mode data connection.
+ * Sequence:
+ *   1) Requires authentication and a non-empty filename.
+ *   2) Opens the existing server-side file (binary read).
+ *   3) Sends 150 reply on the control socket.
+ *   4) Opens the reverse data connection to the client (DATA_FTP_PORT) and
+ *      streams file bytes with send() until EOF.
+ *   5) Closes data socket and file; replies 226 on success.
+ *
+ * Params:
+ *  - S     : (in/out) session state (must be logged in)
+ *  - csock : (in)     control connection socket
+ *  - arg   : (in)     server-side filename to read and send
+ *
+ * Replies:
+ *  - 501 if filename is missing
+ *  - 550 if file cannot be opened / unavailable
+ *  - 150 before starting transfer
+ *  - 425 if data connection cannot be opened
+ *  - 226 after successful transfer (or after best-effort close)
+ *
+ * Notes:
+ *  - Uses fread() and send() on the data socket.
+ */
+static void do_get(Session *S, int csock, const char *arg) {
+    if (!require_login(S, csock)) return;
+    if (!arg || !*arg) { send_reply(csock, 501, "Need filename."); return; }
+
+    FILE *f = fopen(arg, "rb");
+    if (!f) { send_reply(csock, 550, "File unavailable."); return; }
+
+    send_reply(csock, 150, "Opening data connection for get.");
+
+    int dsock = open_data_conn_to_client(csock);
+    if (dsock < 0) {
+        fclose(f);
+        send_reply(csock, 425, "Can't open data connection.");
+        return;
+    }
+
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        ssize_t sent = send(dsock, buf, (int)n, 0);
+        if (sent < 0) { perror("send (get)"); break; }
+    }
+    fclose(f);
+    shutdown(dsock, SHUT_WR);
+    close(dsock);
+
+    send_reply(csock, 226, "Transfer complete.");
+}
+
+/**
+ * main
+ * 
+ * Initializes the server socket, accepts one control connection,
+ * sends a greeting, then loops: receive one command, returns a single reply,
+ * until the client sends 'quit' or disconnects.
+ *
+ * Params:
+ *  - argc, argv : unused
+ *
+ * Returns:
+ *  - OK (0) on normal exit
+ *  - negative error codes on socket/setup failures
+ */
+int main(int argc, char *argv[]) {
+    int msgSize;
+    int listenSocket;
+    int ccSocket;
+    int status;
+	
+    /*
+     * NOTE: without \n at the end of format string in printf,
+     * UNIX will buffer (not flush)
+     * output to display and you will not see it on monitor.
+    */
+
+    printf("Started execution of server ftp\n");
+
+    printf("Initialize ftp server\n");
+    status = svcInitServer(&listenSocket);
+    if (status != 0) {
+        printf("Exiting server ftp due to svcInitServer returned error\n");
+        exit(status);
+    }
+
+    printf("ftp server is waiting to accept connection\n");
+    ccSocket = accept(listenSocket, NULL, NULL);
+    printf("Came out of accept() function\n");
+
+    if (ccSocket < 0) {
+        perror("cannot accept connection:");
+        printf("Server ftp is terminating after closing listen socket.\n");
+        close(listenSocket);
+        return ER_ACCEPT_FAILED;
+    }
+
+    printf("Connected to client, calling receiveMsg to get ftp cmd from client\n");
+
+    Session sess; session_init(&sess);
+    /* Optional greeting */
+    send_reply(ccSocket, 220, "Simple FTP ready.");
+
+    do {
+        status = receiveMessage(ccSocket, userCmd, sizeof(userCmd), &msgSize);
+        if (status < 0 || msgSize <= 0) {
+            printf("Receive message failed/closed. Closing control connection.\n");
+            printf("Server ftp is terminating.\n");
+            break;
+        }
+
+        split_cmd(userCmd, cmd, sizeof(cmd), argument, sizeof(argument));
+
+	/* set cmd to lower case */
+        str_tolower(cmd); 
+
+        /* 
+	 * Dispatch
+        */
+        if (strcmp(cmd, "user") == 0) {
+    		do_user(&sess, ccSocket, argument);
+	} else if (strcmp(cmd, "pass") == 0) {
+    		do_pass(&sess, ccSocket, argument);
+	} else if (strcmp(cmd, "quit") == 0) {
+    		do_quit(&sess, ccSocket);
+	} else if (strcmp(cmd, "mkdir") == 0 || strcmp(cmd, "mkd") == 0) {
+    		do_mkdir(&sess, ccSocket, argument);
+	} else if (strcmp(cmd, "rmdir") == 0 || strcmp(cmd, "rmd") == 0) {
+    		do_rmdir(&sess, ccSocket, argument);
+	} else if (strcmp(cmd, "cd") == 0 || strcmp(cmd, "cwd") == 0) {
+    		do_cd(&sess, ccSocket, argument);
+	} else if (strcmp(cmd, "dele") == 0) {
+    		do_dele(&sess, ccSocket, argument);
+	} else if (strcmp(cmd, "pwd") == 0) {
+    		do_pwd(&sess, ccSocket);
+	} else if (strcmp(cmd, "ls") == 0) {
+    		do_ls(&sess, ccSocket);
+	} else if (strcmp(cmd, "stat") == 0 || strcmp(cmd, "status") == 0) {
+    		do_stat(&sess, ccSocket);
+	} else if (strcmp(cmd, "help") == 0) {
+    		do_help(ccSocket);
+	} else if (strcmp(cmd, "put") == 0) {
+    		do_put(&sess, ccSocket, argument);
+	} else if (strcmp(cmd, "get") == 0) {
+    		do_get(&sess, ccSocket, argument);
+	} else {
+    		send_reply(ccSocket, 500, "Unknown command.");
+	}                                         
+
+    } while (strcmp(cmd, "quit") != 0);
+
+    printf("Closing control connection socket.\n");
+    close(ccSocket);
+    printf("Closing listen socket.\n");
+    close(listenSocket);
+    printf("Existing from server ftp main\n");
+    return status;
+}
+
+/* ======= HW#1 networking functions ======= */
+
+/**
+ * svcInitServer
+ * -------------
+ * Create, bind, and listen on a TCP socket for the control connection.
+ *
+ * Params:
+ *  - s : (out) receives the listening socket descriptor
+ *
+ * Returns:
+ *  - OK on success
+ *  - ER_CREATE_SOCKET_FAILED, ER_BIND_FAILED on failure
+ */
+int svcInitServer (int *s) {
+    int sock;
+    struct sockaddr_in svcAddr;
+    int qlen;
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("cannot create socket");
+        return ER_CREATE_SOCKET_FAILED;
+    }
+    memset((char *)&svcAddr, 0, sizeof(svcAddr));
+    svcAddr.sin_family = AF_INET;
+    svcAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    svcAddr.sin_port = htons(SERVER_FTP_PORT);
+    if (bind(sock, (struct sockaddr *)&svcAddr, sizeof(svcAddr)) < 0) {
+        perror("cannot bind");
+        close(sock);
+        return ER_BIND_FAILED;
+    }
+    qlen = 1;
+    listen(sock, qlen);
+    *s = sock;
+    return OK;
+}
+
+/**
+ * sendMessage
+ * -----------
+ * Sends exactly msgSize bytes from msg over socket s.
+ * Also prints the message bytes to server stdout.
+ *
+ * Params:
+ *  - s       : (in) socket to send on
+ *  - msg     : (in) pointer to data (NUL-terminated line in this program)
+ *  - msgSize : (in) number of bytes to send (include terminating NUL)
+ *
+ * Returns:
+ *  - OK on success
+ *  - ER_SEND_FAILED if send() fails
+ */
+int sendMessage(int s, char *msg, int msgSize) {
+    int i;
+    for (i=0; i<msgSize; i++) printf("%c", msg[i]);
+    printf("\n");
+    if (send(s, msg, msgSize, 0) < 0) {
+        perror("unable to send ");
+        return ER_SEND_FAILED;
+    }
+    return OK;
+}
+
+/**
+ * receiveMessage
+ * --------------
+ * Receives up to bufferSize bytes into buffer from socket s.
+ * Also prints the received bytes to server stdout.
+ *
+ * Params:
+ *  - s          : (in) socket to read from
+ *  - buffer     : (out) destination buffer
+ *  - bufferSize : (in)  max bytes to read
+ *  - msgSize    : (out) actual number of bytes received
+ *
+ * Returns:
+ *  - OK on success (including when peer closes after sending 0 bytes; caller checks size)
+ *  - ER_RECEIVE_FAILED if recv() < 0
+ */
+int receiveMessage (int s, char *buffer, int bufferSize, int *msgSize) {
+    int i;
+    *msgSize = recv(s, buffer, bufferSize, 0);
+    if (*msgSize < 0) {
+        perror("unable to receive");
+        return ER_RECEIVE_FAILED;
+    }
+    for (i=0; i<*msgSize; i++) printf("%c", buffer[i]);
+    printf("\n");
+    return OK;
+}

@@ -1,0 +1,322 @@
+$ pwd
+/home/basova/ftpProject/server
+$ ls -l
+total 120
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rw-rw-r-- 1 basova basova    87 Nov  5 19:48 orange.txt
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova     0 Nov  5 20:20 serverftphw3output
+$ rm orange.txt
+$ ls -l
+total 116
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova     0 Nov  5 20:20 serverftphw3output
+$ ./serverftphw3
+Started execution of server ftp
+Initialize ftp server
+ftp server is waiting to accept connection
+Came out of accept() function
+Connected to client, calling receiveMsg to get ftp cmd from client
+220 Simple FTP ready.
+ 
+mkdir castle 
+530 Please login first.
+ 
+help 
+214 Commands: user <u>, pass <p>, quit, mkdir/mkd <dir>, rmdir/rmd <dir>, cd/cwd <dir>, dele <file>, pwd, ls, stat/status, help, get <file>, put <file>
+ 
+stat 
+211 mode=ASCII, logged_in=0, user=ninja, cwd=/home/basova/ftpProject/server
+ 
+I am ninja cool 
+500 Unknown command.
+ 
+rmdir wall 
+530 Please login first.
+ 
+pwd 
+530 Please login first.
+ 
+dele ring.txt 
+530 Please login first.
+ 
+put ring.txt 
+530 Please login first.
+ 
+user  
+501 Need username.
+ 
+pass password 
+503 Login with USER first.
+ 
+user ninja2 
+530 Invalid user.
+ 
+user sasha 
+331 User name okay, need password.
+ 
+pass knock 
+530 Login incorrect.
+ 
+pass p421 
+230 User logged in, proceed.
+ 
+pwd 
+257 "/home/basova/ftpProject/server"
+ 
+ls  
+total 116
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova     0 Nov  5 20:20 serverftphw3output
+212 ls done.
+ 
+mkdir castle 
+257 "castle" successfully created.
+ 
+ls -l 
+total 116
+drwxrwxr-x 2 basova basova     6 Nov  5 20:24 castle
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova     0 Nov  5 20:20 serverftphw3output
+212 ls done.
+ 
+cd  
+501 Need directory.
+ 
+cd castle 
+250 Directory changed to /home/basova/ftpProject/server/castle.
+ 
+pwd 
+257 "/home/basova/ftpProject/server/castle"
+ 
+mkdir 
+501 Need directory name.
+ 
+cd ../ 
+250 Directory changed to /home/basova/ftpProject/server.
+ 
+rmdir castle 
+250 Directory removed.
+ 
+put  
+501 Need filename.
+ 
+put book.txt 
+150 Opening data connection for put.
+ 
+550 No data received.
+ 
+ls  
+total 116
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova     0 Nov  5 20:20 serverftphw3output
+212 ls done.
+ 
+put ring.txt 
+150 Opening data connection for put.
+ 
+226 Transfer complete.
+ 
+ls -l 
+total 120
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rw-rw-r-- 1 basova basova   196 Nov  5 20:26 ring.txt
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova     0 Nov  5 20:20 serverftphw3output
+212 ls done.
+ 
+user lindsey 
+331 User name okay, need password.
+ 
+pass 4928 
+230 User logged in, proceed.
+ 
+help 
+214 Commands: user <u>, pass <p>, quit, mkdir/mkd <dir>, rmdir/rmd <dir>, cd/cwd <dir>, dele <file>, pwd, ls, stat/status, help, get <file>, put <file>
+ 
+stat 
+211 mode=ASCII, logged_in=1, user=lindsey, cwd=/home/basova/ftpProject/server
+ 
+mkd town 
+257 "town" successfully created.
+ 
+ls 
+total 124
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rw-rw-r-- 1 basova basova   196 Nov  5 20:26 ring.txt
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova  4096 Nov  5 20:26 serverftphw3output
+drwxrwxr-x 2 basova basova     6 Nov  5 20:27 town
+212 ls done.
+ 
+rmd town 
+250 Directory removed.
+ 
+ls -l 
+total 124
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rw-rw-r-- 1 basova basova   196 Nov  5 20:26 ring.txt
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova  4096 Nov  5 20:26 serverftphw3output
+212 ls done.
+ 
+got ring.txt 
+500 Unknown command.
+ 
+get ring.txt 
+150 Opening data connection for get.
+ 
+226 Transfer complete.
+ 
+put ring.txt 
+150 Opening data connection for put.
+ 
+226 Transfer complete.
+ 
+ls  
+total 124
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rw-rw-r-- 1 basova basova   196 Nov  5 20:28 ring.txt
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova  4096 Nov  5 20:26 serverftphw3output
+212 ls done.
+ 
+help 
+214 Commands: user <u>, pass <p>, quit, mkdir/mkd <dir>, rmdir/rmd <dir>, cd/cwd <dir>, dele <file>, pwd, ls, stat/status, help, get <file>, put <file>
+ 
+status 
+211 mode=ASCII, logged_in=1, user=lindsey, cwd=/home/basova/ftpProject/server
+ 
+mkdir cave 
+257 "cave" successfully created.
+ 
+cwd cave 
+250 Directory changed to /home/basova/ftpProject/server/cave.
+ 
+pwd 
+257 "/home/basova/ftpProject/server/cave"
+ 
+cd ../ 
+250 Directory changed to /home/basova/ftpProject/server.
+ 
+dele ring.txt 
+250 File deleted.
+ 
+ls 
+total 120
+drwxrwxr-x 2 basova basova     6 Nov  5 20:29 cave
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova  4096 Nov  5 20:26 serverftphw3output
+212 ls done.
+ 
+rmkdir cave 
+500 Unknown command.
+ 
+rmd cave 
+250 Directory removed.
+ 
+ls  
+total 120
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova  4096 Nov  5 20:26 serverftphw3output
+212 ls done.
+ 
+quit 
+221 Goodbye.
+ 
+Closing control connection socket.
+Closing listen socket.
+Existing from server ftp main
+$ touch one.txt
+$ vim one.txt
+$ cat one.txt
+Big Brother Is Watching You
+$ ls -l
+total 128
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rw-rw-r-- 1 basova basova    28 Nov  5 20:33 one.txt
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova  8192 Nov  5 20:32 serverftphw3output
+$ ./serverftphw3
+Started execution of server ftp
+Initialize ftp server
+ftp server is waiting to accept connection
+Came out of accept() function
+Connected to client, calling receiveMsg to get ftp cmd from client
+220 Simple FTP ready.
+ 
+stat 
+211 mode=ASCII, logged_in=0, user=ninja, cwd=/home/basova/ftpProject/server
+ 
+user sasha 
+331 User name okay, need password.
+ 
+pass p421 
+230 User logged in, proceed.
+ 
+ls 
+total 132
+-rw-rw-r-- 1 basova basova  4353 Oct 24 19:49 hw2_server_output
+-rw-rw-r-- 1 basova basova    28 Nov  5 20:33 one.txt
+-rwxrwxr-x 1 basova basova 21984 Oct 14 19:21 serverftphw2
+-rw-rw-r-- 1 basova basova 22507 Oct 14 19:20 serverftphw2.c
+-rwxrwxr-x 1 basova basova 26480 Nov  5 19:46 serverftphw3
+-rw-rw-r-- 1 basova basova 30217 Nov  5 19:46 serverftphw3.c
+-rw-rw-r-- 1 basova basova 12288 Nov  5 20:34 serverftphw3output
+212 ls done.
+ 
+get one.txt 
+150 Opening data connection for get.
+ 
+226 Transfer complete.
+ 
+quit 
+221 Goodbye.
+ 
+Closing control connection socket.
+Closing listen socket.
+Existing from server ftp main
+$ exit
+

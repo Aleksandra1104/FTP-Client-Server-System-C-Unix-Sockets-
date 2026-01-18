@@ -1,0 +1,299 @@
+$ pwd
+/home/basova/ftpProject/client
+$ ls -l
+total 84
+-rwxrwxr-x 1 basova basova 17384 Sep 26 16:28 clientftphw2
+-rw-rw-r-- 1 basova basova 10212 Sep 26 16:25 clientftphw2.c
+-rwxrwxr-x 1 basova basova 21784 Nov  5 18:47 clientftphw3
+-rw-rw-r-- 1 basova basova 17250 Nov  5 18:46 clientftphw3.c
+-rw-rw-r-- 1 basova basova     0 Nov  5 20:19 clientftphw3output
+-rw-rw-r-- 1 basova basova  2880 Oct 24 19:49 hw2_client_output
+-rw-rw-r-- 1 basova basova   196 Nov  5 20:16 ring.txt
+$ cat ring.txt
+Ash nazg durbatuluk, ash nazg gimbatul, ash nazg thrakatuluk agh burzum-ishi krimpatul. One ring to rule them all, one ring to find them, one ring to bring them all and in the darkness bind them.
+$ ./clientftphw3
+Started execution of client ftp
+Calling clntConnect to connect to the server
+220 Simple FTP ready.
+ 
+my ftp> get mkdir castle
+mkdir castle 
+530 Please login first.
+ 
+my ftp> help
+help 
+214 Commands: user <u>, pass <p>, quit, mkdir/mkd <dir>, rmdir/rmd <dir>, cd/cwd <dir>, dele <file>, pwd, ls, stat/status, help, get <file>, put <file>
+ 
+my ftp> stat
+stat 
+211 mode=ASCII, logged_in=0, user=ninja, cwd=/home/basova/ftpProject/server
+ 
+my ftp> I am ninja cool
+I am ninja cool 
+500 Unknown command.
+ 
+my ftp> rmdir wall
+rmdir wall 
+530 Please login first.
+ 
+my ftp> cd pwd
+pwd 
+530 Please login first.
+ 
+my ftp> dele ring.txt
+dele ring.txt 
+530 Please login first.
+ 
+my ftp> put ring.txt
+put ring.txt 
+530 Please login first.
+ 
+my ftp> user 
+user  
+501 Need username.
+ 
+my ftp> pass password
+pass password 
+503 Login with USER first.
+ 
+my ftp> user ninja2
+user ninja2 
+530 Invalid user.
+ 
+my ftp> user sasha
+user sasha 
+331 User name okay, need password.
+ 
+my ftp> pass knock
+pass knock 
+530 Login incorrect.
+ 
+my ftp> pass p421
+pass p421 
+230 User logged in, proceed.
+ 
+my ftp> pwd
+pwd 
+257 "/home/basova/ftpProject/server"
+ 
+my ftp> ls 
+ls  
+212 ls done.
+ 
+my ftp> mkdir castle
+mkdir castle 
+257 "castle" successfully created.
+ 
+my ftp> ls -l
+ls -l 
+212 ls done.
+ 
+my ftp> cd 
+cd  
+501 Need directory.
+ 
+my ftp> cd castle
+cd castle 
+250 Directory changed to /home/basova/ftpProject/server/castle.
+ 
+my ftp> pwd
+pwd 
+257 "/home/basova/ftpProject/server/castle"
+ 
+my ftp> mkdir
+mkdir 
+501 Need directory name.
+ 
+my ftp> cd ../
+cd ../ 
+250 Directory changed to /home/basova/ftpProject/server.
+ 
+my ftp> rmdir castle
+rmdir castle 
+250 Directory removed.
+ 
+my ftp> put 
+put  
+501 Need filename.
+ 
+my ftp> put book.txt
+put book.txt 
+150 Opening data connection for put.
+ 
+fopen (put): No such file or directory
+550 No data received.
+ 
+my ftp> ls 
+ls  
+212 ls done.
+ 
+my ftp> put ring.txt
+put ring.txt 
+150 Opening data connection for put.
+ 
+226 Transfer complete.
+ 
+my ftp> ls -l
+ls -l 
+212 ls done.
+ 
+my ftp> user lindsey
+user lindsey 
+331 User name okay, need password.
+ 
+my ftp> pass 4928
+pass 4928 
+230 User logged in, proceed.
+ 
+my ftp> help
+help 
+214 Commands: user <u>, pass <p>, quit, mkdir/mkd <dir>, rmdir/rmd <dir>, cd/cwd <dir>, dele <file>, pwd, ls, stat/status, help, get <file>, put <file>
+ 
+my ftp> stat
+stat 
+211 mode=ASCII, logged_in=1, user=lindsey, cwd=/home/basova/ftpProject/server
+ 
+my ftp> mkd town
+mkd town 
+257 "town" successfully created.
+ 
+my ftp> ls
+ls 
+212 ls done.
+ 
+my ftp> rmd town
+rmd town 
+250 Directory removed.
+ 
+my ftp> ls -l
+ls -l 
+212 ls done.
+ 
+my ftp> got ring.txt
+got ring.txt 
+500 Unknown command.
+ 
+my ftp> get ring.txt
+get ring.txt 
+150 Opening data connection for get.
+ 
+226 Transfer complete.
+ 
+my ftp> put ring.txt
+put ring.txt 
+150 Opening data connection for put.
+ 
+226 Transfer complete.
+ 
+my ftp> ls 
+ls  
+212 ls done.
+ 
+my ftp> help
+help 
+214 Commands: user <u>, pass <p>, quit, mkdir/mkd <dir>, rmdir/rmd <dir>, cd/cwd <dir>, dele <file>, pwd, ls, stat/status, help, get <file>, put <file>
+ 
+my ftp> status
+status 
+211 mode=ASCII, logged_in=1, user=lindsey, cwd=/home/basova/ftpProject/server
+ 
+my ftp> mkdir cave
+mkdir cave 
+257 "cave" successfully created.
+ 
+my ftp> cwd cave
+cwd cave 
+250 Directory changed to /home/basova/ftpProject/server/cave.
+ 
+my ftp> pwd
+pwd 
+257 "/home/basova/ftpProject/server/cave"
+ 
+my ftp> cd ../
+cd ../ 
+250 Directory changed to /home/basova/ftpProject/server.
+ 
+my ftp> dele ring.txt
+dele ring.txt 
+250 File deleted.
+ 
+my ftp> ls
+ls 
+212 ls done.
+ 
+my ftp> rmkdir cave
+rmkdir cave 
+500 Unknown command.
+ 
+my ftp> rmd cave
+rmd cave 
+250 Directory removed.
+ 
+my ftp> ls 
+ls  
+212 ls done.
+ 
+my ftp> quit
+quit 
+221 Goodbye.
+ 
+Closing control connection 
+Exiting client main 
+$ ls -l
+total 88
+-rwxrwxr-x 1 basova basova 17384 Sep 26 16:28 clientftphw2
+-rw-rw-r-- 1 basova basova 10212 Sep 26 16:25 clientftphw2.c
+-rwxrwxr-x 1 basova basova 21784 Nov  5 18:47 clientftphw3
+-rw-rw-r-- 1 basova basova 17250 Nov  5 18:46 clientftphw3.c
+-rw-rw-r-- 1 basova basova  4096 Nov  5 20:29 clientftphw3output
+-rw-rw-r-- 1 basova basova  2880 Oct 24 19:49 hw2_client_output
+-rw-rw-r-- 1 basova basova   196 Nov  5 20:28 ring.txt
+$ cat ring.txt
+Ash nazg durbatuluk, ash nazg gimbatul, ash nazg thrakatuluk agh burzum-ishi krimpatul. One ring to rule them all, one ring to find them, one ring to bring them all and in the darkness bind them.
+$ ./clientftphw3
+Started execution of client ftp
+Calling clntConnect to connect to the server
+220 Simple FTP ready.
+ 
+my ftp> stat
+stat 
+211 mode=ASCII, logged_in=0, user=ninja, cwd=/home/basova/ftpProject/server
+ 
+my ftp> user sasha
+user sasha 
+331 User name okay, need password.
+ 
+my ftp> pass p421
+pass p421 
+230 User logged in, proceed.
+ 
+my ftp> ls
+ls 
+212 ls done.
+ 
+my ftp> get one.txt
+get one.txt 
+150 Opening data connection for get.
+ 
+226 Transfer complete.
+ 
+my ftp> quit
+quit 
+221 Goodbye.
+ 
+Closing control connection 
+Exiting client main 
+$ ls -l
+total 92
+-rwxrwxr-x 1 basova basova 17384 Sep 26 16:28 clientftphw2
+-rw-rw-r-- 1 basova basova 10212 Sep 26 16:25 clientftphw2.c
+-rwxrwxr-x 1 basova basova 21784 Nov  5 18:47 clientftphw3
+-rw-rw-r-- 1 basova basova 17250 Nov  5 18:46 clientftphw3.c
+-rw-rw-r-- 1 basova basova  4096 Nov  5 20:29 clientftphw3output
+-rw-rw-r-- 1 basova basova  2880 Oct 24 19:49 hw2_client_output
+-rw-rw-r-- 1 basova basova    28 Nov  5 20:34 one.txt
+-rw-rw-r-- 1 basova basova   196 Nov  5 20:28 ring.txt
+$ cat one.txt
+Big Brother Is Watching You
+$ exit
+
